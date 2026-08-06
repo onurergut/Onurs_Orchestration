@@ -91,8 +91,8 @@ A self-hosted backend service that orchestrates multi-agent software engineering
 ### Orchestrator refinements (from research)
 
 - **Two-tier persistence:** `@persist` saves FlowState (artifacts, plan content); `checkpoint=True` saves execution pointer (`completed_stages`). Flow always re-enters at `@start`, but stages check `completed_stages` and skip if done. Resume via `restore_from_state_id`.
-- **Stage atomicity:** Pause boundaries only between stages. A stage runs to completion or fails atomically — never half-done.
-- **Idempotency on side-effects:** Every external call uses a deterministic `idempotency_key`. On resume, the adapter checks for an existing receipt with that key; if found, it returns the existing record and skips re-execution. Prevents duplicate Jira tickets, PRs, Slack messages on retry/resume.
+- **Stage atomicity:** Pause boundaries only between stages. A stage runs to completion or fails atomically — never half-done. Within a stage, retries re-execute the whole stage; idempotency on side-effects prevents duplicates from those retries.
+- **Idempotency on side-effects:** Every external call uses a deterministic `idempotency_key`. On resume or stage retry, the adapter checks for an existing receipt with that key; if found, it returns the existing record and skips re-execution. Prevents duplicate Jira tickets, PRs, Slack messages on retry/resume.
 - **Conditional routing:** `@router` after each stage. Test fail → coder (max 3 loops). Security findings high → reviewer flagged. Linear pipeline is a default, not the only path.
 - **LLM gateway:** All LLM calls go through a gateway that resolves tier to provider-specific model, applies circuit breaker, fallback chain, per-tenant rate limit, and multi-key pool round-robin. Unified response shape regardless of provider.
 
@@ -128,7 +128,8 @@ class OrchestratorFlow(Flow[OrchestratorState]):
     def route_after_planner(self) -> str: ...
     @listen(route_after_planner)
     def coder_stage(self): ...
-    @listen(and_(coder_stage, security_stage))  # join
+    # tester_stage + security_stage run in parallel after coder
+    @listen(and_(tester_stage, security_stage))  # join
     def reviewer_stage(self): ...
     # ... docs, human_review
 ```
