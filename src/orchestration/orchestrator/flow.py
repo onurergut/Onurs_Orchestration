@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 from crewai.flow.flow import Flow, and_, listen, start
@@ -9,6 +10,7 @@ from orchestration.adapters.task_source.csv import CsvAdapter
 from orchestration.llm.endpoint import LLMEndpoint
 from orchestration.llm.router import build_client
 from orchestration.observability.audit_middleware import stage_audit
+from orchestration.observability.metrics import observe_stage_duration
 from orchestration.orchestrator.budget_guard import check as budget_check
 from orchestration.orchestrator.state import OrchestratorState
 from orchestration.stages.coder import CoderStage
@@ -22,6 +24,16 @@ from orchestration.storage.models.run import Run
 from orchestration.storage.models.task import Task
 from orchestration.storage.repositories import audit as audit_repo
 from orchestration.git.worktree import WorktreeManager
+
+
+def _record_stage_duration(stage: str, start: float) -> None:
+    """Emit the Prometheus stage_duration_seconds observation.
+
+    Wraps the ``time.monotonic() - start`` math so every stage body
+    uses an identical call site — the histogram label is the same
+    name as the stage method, matching the spec.
+    """
+    observe_stage_duration(stage, time.monotonic() - start)
 
 
 class OrchestratorFlow(Flow[OrchestratorState]):
@@ -77,7 +89,9 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": {},
             })()
+            start = time.monotonic()
             plan = await PlannerStage().run(ctx, llm)
+            _record_stage_duration("planner", start)
             self.state.stage_artifacts["planner"] = plan.model_dump()
             self.state.completed_stages.append("planner")
 
@@ -105,7 +119,9 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": self.state.stage_artifacts,
             })()
+            start = time.monotonic()
             code = await CoderStage().run(ctx, llm)
+            _record_stage_duration("coder", start)
             self.state.stage_artifacts["coder"] = code.model_dump()
             self.state.completed_stages.append("coder")
 
@@ -131,7 +147,9 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": self.state.stage_artifacts,
             })()
+            start = time.monotonic()
             report = await TesterStage().run(ctx, llm=None)
+            _record_stage_duration("tester", start)
             self.state.stage_artifacts["tester"] = report.model_dump()
             self.state.completed_stages.append("tester")
 
@@ -150,7 +168,9 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": self.state.stage_artifacts,
             })()
+            start = time.monotonic()
             report = await SecurityStage().run(ctx, llm=None)
+            _record_stage_duration("security", start)
             self.state.stage_artifacts["security"] = report.model_dump()
             self.state.completed_stages.append("security")
 
@@ -179,7 +199,9 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": self.state.stage_artifacts,
             })()
+            start = time.monotonic()
             review = await ReviewerStage().run(ctx, llm)
+            _record_stage_duration("reviewer", start)
             self.state.stage_artifacts["reviewer"] = review.model_dump()
             self.state.completed_stages.append("reviewer")
 
@@ -207,6 +229,8 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 "worktree_path": Path(self.state.worktree_path),
                 "previous_artifacts": self.state.stage_artifacts,
             })()
+            start = time.monotonic()
             update = await DocsStage().run(ctx, llm)
+            _record_stage_duration("docs", start)
             self.state.stage_artifacts["docs"] = update.model_dump()
             self.state.completed_stages.append("docs")

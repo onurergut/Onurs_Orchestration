@@ -4,6 +4,11 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 
+from orchestration.observability.metrics import (
+    dec_runs_in_progress,
+    inc_runs_failed,
+    inc_runs_in_progress,
+)
 from orchestration.orchestrator.flow import OrchestratorFlow
 from orchestration.orchestrator.state import OrchestratorState
 from orchestration.storage.db import session_scope
@@ -28,6 +33,10 @@ async def run_flow(run_id: UUID) -> None:
     )
     flow = OrchestratorFlow(initial_state=state)
 
+    # Bump the in-progress gauge for the duration of the run. The
+    # ``finally`` block always decrements it so a raise path doesn't
+    # leak the gauge above zero forever.
+    inc_runs_in_progress()
     terminal_status = "succeeded"
     try:
         if hasattr(flow, "kickoff_async"):
@@ -36,8 +45,10 @@ async def run_flow(run_id: UUID) -> None:
             flow.kickoff()
     except Exception:
         terminal_status = "failed"
+        inc_runs_failed()
         raise
     finally:
+        dec_runs_in_progress()
         async with session_scope() as session:
             await session.execute(
                 update(Run)
