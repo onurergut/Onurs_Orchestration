@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: '{"query": "mutation UpdateIssueState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }", "variables": {"id": "ENG-1", "input": {"stateId": "22222222-2222-2222-2222-222222222222"}}}'
+    headers:
+      Authorization:
+      - lin_api_test-key
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-linear-adapter
+    method: POST
+    uri: https://api.linear.app/graphql
+  response:
+    body:
+      string: '{"data":{"issueUpdate":{"success":true}}}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

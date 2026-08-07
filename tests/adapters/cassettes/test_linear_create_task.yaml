@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: '{"query": "mutation CreateIssue($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title description state { name } } } }", "variables": {"input": {"teamId": "00000000-0000-0000-0000-000000000001", "title": "New issue", "description": "New body"}}}'
+    headers:
+      Authorization:
+      - lin_api_test-key
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-linear-adapter
+    method: POST
+    uri: https://api.linear.app/graphql
+  response:
+    body:
+      string: '{"data":{"issueCreate":{"success":true,"issue":{"id":"33333333-3333-3333-3333-333333333333","identifier":"ENG-100","title":"New issue","description":"New body","state":{"name":"Todo"}}}}}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

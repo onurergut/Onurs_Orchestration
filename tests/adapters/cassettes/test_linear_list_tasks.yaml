@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: '{"query": "query ListIssues($filter: IssueFilter!) { issues(filter: $filter) { nodes { id identifier title description state { name } } } }", "variables": {"filter": {"team": {"id": {"eq": "00000000-0000-0000-0000-000000000001"}}, "state": {"type": {"nin": ["completed", "canceled"]}}}}}'
+    headers:
+      Authorization:
+      - lin_api_test-key
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-linear-adapter
+    method: POST
+    uri: https://api.linear.app/graphql
+  response:
+    body:
+      string: '{"data":{"issues":{"nodes":[{"id":"11111111-1111-1111-1111-111111111111","identifier":"ENG-1","title":"First issue","description":"First body","state":{"name":"Todo"}},{"id":"22222222-2222-2222-2222-222222222222","identifier":"ENG-2","title":"Second issue","description":"Second body","state":{"name":"In Progress"}}]}}}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

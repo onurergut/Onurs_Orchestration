@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: '{"query": "mutation CreateComment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body } } }", "variables": {"input": {"issueId": "ENG-1", "body": "Looks good to me"}}}'
+    headers:
+      Authorization:
+      - lin_api_test-key
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-linear-adapter
+    method: POST
+    uri: https://api.linear.app/graphql
+  response:
+    body:
+      string: '{"data":{"commentCreate":{"success":true,"comment":{"id":"comment-1","body":"Looks good to me"}}}}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

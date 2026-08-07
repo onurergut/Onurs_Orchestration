@@ -1,0 +1,22 @@
+interactions:
+- request:
+    body: '{"query": "query GetIssue($id: String!) { issue(id: $id) { id identifier title description state { name } } }", "variables": {"id": "ENG-1"}}'
+    headers:
+      Authorization:
+      - lin_api_test-key
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-linear-adapter
+    method: POST
+    uri: https://api.linear.app/graphql
+  response:
+    body:
+      string: '{"data":{"issue":{"id":"11111111-1111-1111-1111-111111111111","identifier":"ENG-1","title":"First issue","description":"First body","state":{"name":"Todo"}}}}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1
