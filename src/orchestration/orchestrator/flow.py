@@ -79,7 +79,7 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
                 tier="THINKING",
             )
-            llm = build_client(endpoint)
+            llm = await build_client(endpoint)
             ctx = type("Ctx", (), {
                 "run_id": self.state.run_id,
                 "project_id": self.state.project_id,
@@ -109,7 +109,7 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
                 tier="FAST",
             )
-            llm = build_client(endpoint)
+            llm = await build_client(endpoint)
             ctx = type("Ctx", (), {
                 "run_id": self.state.run_id,
                 "project_id": self.state.project_id,
@@ -189,7 +189,7 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
                 tier="THINKING",
             )
-            llm = build_client(endpoint)
+            llm = await build_client(endpoint)
             ctx = type("Ctx", (), {
                 "run_id": self.state.run_id,
                 "project_id": self.state.project_id,
@@ -219,7 +219,7 @@ class OrchestratorFlow(Flow[OrchestratorState]):
                 model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
                 tier="THINKING",
             )
-            llm = build_client(endpoint)
+            llm = await build_client(endpoint)
             ctx = type("Ctx", (), {
                 "run_id": self.state.run_id,
                 "project_id": self.state.project_id,
