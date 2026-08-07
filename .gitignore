@@ -16,3 +16,4 @@ build/
 .firecrawl/
 *.log
 .DS_Store
+.superpowers/
