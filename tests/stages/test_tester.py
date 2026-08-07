@@ -11,7 +11,6 @@ from orchestration.stages.base import StageContext
 from orchestration.stages.tester import TesterStage, TestReport
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PYTEST_BIN = str(PROJECT_ROOT / ".venv" / "bin" / "pytest")
 
 
 def test_tester_stage_metadata():
@@ -101,7 +100,7 @@ async def test_tester_runs_against_tmp_worktree(tmp_path: Path):
         "def test_x():\n    assert True\n"
     )
 
-    stage = TesterStage(pytest_executable=PYTEST_BIN)
+    stage = TesterStage(pytest_executable=None)
     ctx = StageContext(
         run_id=uuid4(),
         project_id=uuid4(),
@@ -130,7 +129,7 @@ async def test_tester_reports_failures_and_flaky(tmp_path: Path):
         "def test_y():\n    assert False\n"
     )
 
-    stage = TesterStage(pytest_executable=PYTEST_BIN)
+    stage = TesterStage(pytest_executable=None)
     ctx = StageContext(
         run_id=uuid4(),
         project_id=uuid4(),

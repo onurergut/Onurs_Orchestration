@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import subprocess
 
 from pydantic import BaseModel
@@ -48,7 +49,9 @@ class SecurityStage(StageCrew):
     # Tell pytest not to try to collect this stage class as a test class.
     __test__ = False
 
-    def __init__(self, bandit_executable: str = ".venv/bin/bandit"):
+    def __init__(self, bandit_executable: str | None = None):
+        if bandit_executable is None:
+            bandit_executable = shutil.which("bandit") or ".venv/bin/bandit"
         self.bandit_executable = bandit_executable
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> SecurityReport:

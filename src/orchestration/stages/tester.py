@@ -6,7 +6,9 @@ Pure subprocess + XML parsing — no LLM call. Returns a `TestReport`.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -33,7 +35,9 @@ class TesterStage(StageCrew):
     # Tell pytest not to try to collect this stage class as a test class.
     __test__ = False
 
-    def __init__(self, pytest_executable: str = ".venv/bin/pytest"):
+    def __init__(self, pytest_executable: str | None = None):
+        if pytest_executable is None:
+            pytest_executable = shutil.which("pytest") or f"{sys.executable} -m pytest"
         self.pytest_executable = pytest_executable
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> TestReport:
