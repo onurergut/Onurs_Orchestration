@@ -193,14 +193,11 @@ async def test_security_stage_finds_high_severity_shell_true(tmp_path: Path):
         assert report.severity == []
     else:
         assert len(report.findings) >= 1
-    # Aggregated severity list should contain high (the shell=True finding).
-    assert "high" in report.severity
-    # The shell=True rule is B602 — confirm it shows up.
-    finding_ids = {f.id for f in report.findings}
-    assert "B602" in finding_ids
-    # Confirm the high-severity finding points at our bad file.
-    high_findings = [f for f in report.findings if f.severity == "high"]
-    assert any(f.id == "B602" for f in high_findings)
+        assert "high" in report.severity
+        finding_ids = {f.id for f in report.findings}
+        assert "B602" in finding_ids
+        high_findings = [f for f in report.findings if f.severity == "high"]
+        assert any(f.id == "B602" for f in high_findings)
     assert any("bad.py" in f.file for f in high_findings)
 
 

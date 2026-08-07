@@ -49,14 +49,15 @@ class SecurityStage(StageCrew):
     # Tell pytest not to try to collect this stage class as a test class.
     __test__ = False
 
-    def __init__(self, bandit_executable: str | None = None):
+    def __init__(self, bandit_executable: list[str] | str | None = None):
         if bandit_executable is None:
             bandit_executable = shutil.which("bandit") or ".venv/bin/bandit"
+        if isinstance(bandit_executable, str):
+            bandit_executable = bandit_executable.split()
         self.bandit_executable = bandit_executable
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> SecurityReport:
-        cmd = [
-            self.bandit_executable,
+        cmd = self.bandit_executable + [
             "-r",
             ".",
             "-f",

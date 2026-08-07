@@ -35,19 +35,23 @@ class TesterStage(StageCrew):
     # Tell pytest not to try to collect this stage class as a test class.
     __test__ = False
 
-    def __init__(self, pytest_executable: str | None = None):
+    def __init__(self, pytest_executable: list[str] | str | None = None):
         if pytest_executable is None:
             pytest_executable = shutil.which("pytest") or f"{sys.executable} -m pytest"
+        if isinstance(pytest_executable, str):
+            pytest_executable = pytest_executable.split()
         self.pytest_executable = pytest_executable
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> TestReport:
-        cmd = [
-            self.pytest_executable,
-            "--junitxml=junit.xml",
-            "--cov=.",
-            "--cov-report=xml:coverage.xml",
-            "-q",
-        ]
+        cmd = (
+            self.pytest_executable
+            + [
+                "--junitxml=junit.xml",
+                "--cov=.",
+                "--cov-report=xml:coverage.xml",
+                "-q",
+            ]
+        )
         # Don't fail on non-zero exit: failing tests are data, not errors.
         # We still want to parse junit.xml/coverage.xml regardless of exit code.
         await asyncio.to_thread(
