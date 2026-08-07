@@ -142,7 +142,7 @@ checkpoint side-effects will be measured in Task 9.
 | `from crewai.flow.flow import Flow, listen, start` | `from crewai.flow import Flow, listen, start` | Updated imports.                          |
 | `async def test_...: ... await flow.kickoff()` | `kickoff()` is sync; `kickoff_async()` is async. | Test is sync; calls `flow.kickoff()`.     |
 | `stages_done: list[str] = []`           | Works, but uses a class-level default that Pydantic v2 copies per instance. | Used `Field(default_factory=list)` defensively. |
-| `@persist` + `checkpoint=True`          | `@persist` is a metadata stamper; `checkpoint=` is a Flow constructor arg. | Deferred to Task 9; not used in Task 8 test. |
+| `@persist` + `checkpoint=True`          | `@persist()` is a metadata stamper; `checkpoint=` is a Flow constructor arg. The decorator **must** be written `@persist()` (with parens), not `@persist` — see §"Persist + checkpoint findings" below. | Deferred to Task 9; not used in Task 8 test. |
 
 ## Verification
 
@@ -150,10 +150,155 @@ checkpoint side-effects will be measured in Task 9.
 $ .venv/bin/pytest tests/spike/test_flow_basics.py -v
 tests/spike/test_flow_basics.py::test_spike_flow_runs_three_stages PASSED
 tests/spike/test_flow_basics.py::test_spike_flow_state_is_isolated_per_instance PASSED
-2 passed
+tests/spike/test_flow_basics.py::test_persist_round_trip PASSED
+tests/spike/test_flow_basics.py::test_checkpoint_config_writes_json_artifacts PASSED
+4 passed
 ```
 
 `ruff check tests/spike/` — clean.
+
+## Persist + checkpoint findings
+
+Task 9 added two tests that wire `@persist()` and `CheckpointConfig`
+together on the same Flow class. The brief assumed they "just work" as
+adjacent decorators; the installed library (crewai 1.15.12) requires
+specific syntax and has surprising semantics around `restore_from_state_id`.
+
+### `@persist()` decorator — call it with parens
+
+`persist(persistence=None, verbose=False)` is a decorator **factory**. The
+brief's illustrative `@persist` (no parens) does not work; Python binds the
+underlying function as the `persistence=` positional arg and `persist()`
+returns its inner `decorator` closure in place of the original method. The
+runtime then tries to call that closure with `(self, *args)` and silently
+produces empty state.
+
+Reproduction (after Task 9's first cut): with `@persist` (no parens) on the
+`init` method, `flow.state.stages_done` stayed `[]` after kickoff and the
+listener chain broke at `plan`. Switching every occurrence to `@persist()`
+fixed it. Symptom surface: `StartMethod._meth` is a `persist.<locals>.decorator`
+function instead of the original method.
+
+```python
+# CORRECT
+@start()
+@persist()
+def init(self): ...
+
+# WRONG — replaces init with persist's inner decorator closure
+@start()
+@persist
+def init(self): ...
+```
+
+### State must have an `id` field
+
+The persistence decorator rejects any state model without an `id`
+attribute (see `crewai/flow/persistence/decorators.py` — the id check
+raises `ValueError("Flow state must have an 'id' field for
+persistence")`). The library's own `crewai.flow.runtime.FlowState`
+provides a `uuid4()` default; we roll our own here so the test doesn't
+import a private path.
+
+```python
+class SpikeState(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    # ...
+```
+
+### Default persistence backend is SQLite at a user-data path
+
+`default_flow_persistence()` (called when neither `@persist` nor
+`persistence=` is supplied on the instance) returns
+`SQLiteFlowPersistence(db_path="<user data dir>/flow_states.db")` — on
+macOS that's `~/Library/Application Support/Onurs_Orchestration/flow_states.db`.
+For tests we override via:
+
+```python
+SQLiteFlowPersistence(db_path=str(tmp_path / "states.db"))
+```
+
+`init_db` is called automatically in the `@model_validator` and creates the
+`flow_states` and `pending_feedback` tables. `save_state` inserts one row
+per completed method (no upsert); `load_state(uuid)` returns the latest
+row's JSON.
+
+### `@persist()` is method-scoped; class-level `@persist` exists too
+
+`@persist()` applied to a **method** stamps `__flow_persistence_config__`
+on the `FlowMethod` wrapper. The runtime's `_persist_method_completion`
+reads `method_definition.persist` first, falling back to
+`self._definition.persist` (only set when `@persist` decorates the
+**class**). To snapshot after every completed method, either decorate the
+class (`@persist() class MyFlow(...)`) or apply `@persist()` to every
+method. Mixing is fine: with method-level `@persist()` on `init/plan/execute`,
+the SQLite history accumulates one row per stage.
+
+### `checkpoint=True` writes nothing for a Flow — override `on_events`
+
+`Flow.checkpoint=True` is coerced (in `_coerce_checkpoint`) to
+`CheckpointConfig(on_events=["task_completed"])`. `task_completed` is a
+Crew event that Flow never fires, so the default-on-True config writes
+zero JSON files for an entire Flow run. The right knob is:
+
+```python
+CheckpointConfig(location=str(ckpt_dir), on_events=["*"])
+# or, for tighter control:
+CheckpointConfig(
+    location=str(ckpt_dir),
+    on_events=["flow_started", "method_execution_finished", "flow_finished"],
+)
+```
+
+### Checkpoint artifact location and shape
+
+With `JsonProvider` (default) and `on_events=["*"]`, each matched event
+produces one file under `<location>/main/{ts}_{uuid8}_p-{parent_id}.json`.
+The `main/` subdirectory is the default `branch`; the timestamp + 8-char
+uuid make up the id; the parent id encodes lineage in the filename (no
+parsing needed). Each file's body is the full `RuntimeState` dump — a
+`crewai_version`, `parent_id`, `branch`, the `entities` array (each
+entity is `model_dump(mode="json")`-serialized, with public flow fields
+plus `checkpoint_completed_methods`, `checkpoint_method_outputs`,
+`checkpoint_method_counts`, `checkpoint_state`), and the `event_record`.
+
+`SqliteProvider` would use `<location>` as a database file path instead
+(the validator appends `.db` if no suffix). For production we'll likely
+want a custom Postgres-backed provider; the `FlowPersistence` interface
+is just `init_db`, `save_state`, `load_state` and the pending-feedback
+triad.
+
+### `restore_from_state_id` forks, not resumes
+
+`Flow.kickoff(restore_from_state_id=uuid)`:
+1. Calls `persistence.load_state(uuid)`.
+2. Hydrates `self._state` from the snapshot via `_restore_state`.
+3. Mints a **fresh** `state.id` (unless `inputs={"id": ...}` is also
+   pinned, in which case that wins — and that pins the new flow to the
+   source's persistence key, usually not what you want).
+4. Runs the whole flow again from the start.
+
+Observable consequence in the test: after restore, the new flow's
+`stages_done` contains the **restored three entries followed by the
+re-executed three entries** (`["init", "plan", "execute", "init", "plan",
+"execute"]`). The source UUID's snapshot is preserved untouched — the
+fork writes under the new id. This is *fork* semantics, not *resume*.
+There is no built-in idempotency-on-restore story at the method level; the
+caller has to detect re-execution. (That's the gap Task 11 will look at.)
+
+`Flow.from_checkpoint` / `Flow.fork` exist alongside, operating on the
+`CheckpointConfig` line (different persistence layer — the JSON files,
+not the SQLite `@persist` DB). They use `_restored_from_checkpoint` and
+`_is_execution_resuming` flags internally and are the right tool when you
+want *resume* (skip already-completed methods) rather than *fork*.
+
+### Things that did **not** pan out the way the brief suggested
+
+The brief's test_persist_round_trip sketch expected `flow.state.flow_uuid`
+and constructor args `persist=True, checkpoint=True` — neither exists.
+`flow.state.flow_uuid` is not a thing in this library (it's `flow.state.id`),
+and constructor kwargs are `persistence=` (a `FlowPersistence` instance) and
+`checkpoint=` (a `CheckpointConfig | bool | None`).
 
 ## Implications for spec §5.2
 
