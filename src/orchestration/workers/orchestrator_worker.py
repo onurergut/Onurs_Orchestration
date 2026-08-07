@@ -26,9 +26,8 @@ async def run_flow(run_id: UUID) -> None:
         project_id=run.project_id,
         task_id=run.task_id,
     )
-    # CrewAI Flow[OrchestratorState] uses Pydantic generic — state fields are
-    # required at construction. Spread the state's kwargs into the Flow ctor.
-    flow = OrchestratorFlow(**state.model_dump())
+    # CrewAI Flow takes its Pydantic state via the `initial_state` kwarg.
+    flow = OrchestratorFlow(initial_state=state)
     await flow.kickoff_async() if hasattr(flow, "kickoff_async") else flow.kickoff()
 
 
