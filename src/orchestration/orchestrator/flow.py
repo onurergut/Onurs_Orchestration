@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from crewai.flow.flow import Flow, listen, start
+from crewai.flow.flow import Flow, and_, listen, start
 from sqlalchemy import select
 
 from orchestration.adapters.review.web_ui import WebUiAdapter
@@ -11,7 +11,11 @@ from orchestration.llm.router import build_client
 from orchestration.orchestrator.budget_guard import check as budget_check
 from orchestration.orchestrator.state import OrchestratorState
 from orchestration.stages.coder import CoderStage
+from orchestration.stages.docs import DocsStage
 from orchestration.stages.planner import PlannerStage
+from orchestration.stages.reviewer import ReviewerStage
+from orchestration.stages.security import SecurityStage
+from orchestration.stages.tester import TesterStage
 from orchestration.storage.db import session_scope
 from orchestration.storage.models.run import Run
 from orchestration.storage.models.task import Task
@@ -35,6 +39,16 @@ class OrchestratorFlow(Flow[OrchestratorState]):
             self.state.task_external_id = task.external_id
             self.state.task_title = task.title
             self.state.task_description = task.description
+            # Resume mitigation (Task 20 review finding): hydrate the flow's
+            # completed_stages from the Run row so already-done stages
+            # short-circuit via their "stage in completed_stages" guards.
+            # Run.completed_stages is JSONB (list[str] | None on the wire;
+            # SQLAlchemy returns None for a NULL column or an empty list
+            # for the [] default). Normalize both to an empty list before
+            # handing it to the state model.
+            self.state.completed_stages = (
+                list(run.completed_stages) if run.completed_stages else []
+            )
         await audit_repo.audit(self.state.project_id, self.state.run_id, "system:orchestrator", "load_context", {})
 
     @listen(load_context)
@@ -90,3 +104,101 @@ class OrchestratorFlow(Flow[OrchestratorState]):
         code = await CoderStage().run(ctx, llm)
         self.state.stage_artifacts["coder"] = code.model_dump()
         self.state.completed_stages.append("coder")
+
+    # ----- Parallel join: tester + security fan out from coder -----
+    # Both branches carry the same decorator (``@listen(and_(coder_stage))``)
+    # so the runtime schedules them as siblings triggered by a common
+    # upstream completion. They share self.state but each only writes its
+    # own artifact key, so concurrent writes are disjoint.
+    @listen(and_(coder_stage))
+    async def tester_stage(self):
+        await budget_check(self.state.project_id)
+        if "tester" in self.state.completed_stages:
+            return
+        # Subprocess-only stage; pass llm=None since the protocol requires
+        # the argument but TesterStage.run ignores it.
+        ctx = type("Ctx", (), {
+            "run_id": self.state.run_id,
+            "project_id": self.state.project_id,
+            "task_external_id": self.state.task_external_id,
+            "task_title": self.state.task_title,
+            "task_description": self.state.task_description,
+            "worktree_path": Path(self.state.worktree_path),
+            "previous_artifacts": self.state.stage_artifacts,
+        })()
+        report = await TesterStage().run(ctx, llm=None)
+        self.state.stage_artifacts["tester"] = report.model_dump()
+        self.state.completed_stages.append("tester")
+
+    @listen(and_(coder_stage))
+    async def security_stage(self):
+        await budget_check(self.state.project_id)
+        if "security" in self.state.completed_stages:
+            return
+        ctx = type("Ctx", (), {
+            "run_id": self.state.run_id,
+            "project_id": self.state.project_id,
+            "task_external_id": self.state.task_external_id,
+            "task_title": self.state.task_title,
+            "task_description": self.state.task_description,
+            "worktree_path": Path(self.state.worktree_path),
+            "previous_artifacts": self.state.stage_artifacts,
+        })()
+        report = await SecurityStage().run(ctx, llm=None)
+        self.state.stage_artifacts["security"] = report.model_dump()
+        self.state.completed_stages.append("security")
+
+    # ----- Reviewer joins both parallel branches -----
+    @listen(and_(tester_stage, security_stage))
+    async def reviewer_stage(self):
+        await budget_check(self.state.project_id)
+        if "reviewer" in self.state.completed_stages:
+            return
+        endpoint = LLMEndpoint(
+            name="primary",
+            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+            tier="THINKING",
+        )
+        llm = build_client(endpoint)
+        ctx = type("Ctx", (), {
+            "run_id": self.state.run_id,
+            "project_id": self.state.project_id,
+            "task_external_id": self.state.task_external_id,
+            "task_title": self.state.task_title,
+            "task_description": self.state.task_description,
+            "worktree_path": Path(self.state.worktree_path),
+            "previous_artifacts": self.state.stage_artifacts,
+        })()
+        review = await ReviewerStage().run(ctx, llm)
+        self.state.stage_artifacts["reviewer"] = review.model_dump()
+        self.state.completed_stages.append("reviewer")
+
+    @listen(reviewer_stage)
+    async def docs_stage(self):
+        await budget_check(self.state.project_id)
+        if "docs" in self.state.completed_stages:
+            return
+        endpoint = LLMEndpoint(
+            name="primary",
+            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+            tier="THINKING",
+        )
+        llm = build_client(endpoint)
+        ctx = type("Ctx", (), {
+            "run_id": self.state.run_id,
+            "project_id": self.state.project_id,
+            "task_external_id": self.state.task_external_id,
+            "task_title": self.state.task_title,
+            "task_description": self.state.task_description,
+            "worktree_path": Path(self.state.worktree_path),
+            "previous_artifacts": self.state.stage_artifacts,
+        })()
+        update = await DocsStage().run(ctx, llm)
+        self.state.stage_artifacts["docs"] = update.model_dump()
+        self.state.completed_stages.append("docs")
