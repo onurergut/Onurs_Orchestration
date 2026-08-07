@@ -1,7 +1,10 @@
+import logging
+
 from redis.asyncio import ConnectionPool, Redis
 
 from orchestration.config import settings
 
+logger = logging.getLogger(__name__)
 _pool: ConnectionPool | None = None
 
 
@@ -12,5 +15,22 @@ def get_pool() -> ConnectionPool:
     return _pool
 
 
+def disconnect_pool() -> None:
+    """Tear down the cached pool (e.g. between tests with fresh event loops)."""
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.disconnect()
+        except Exception:
+            pass
+    _pool = None
+
+
 def get_redis() -> Redis:
-    return Redis(connection_pool=get_pool())
+    """Return a Redis client. Auto-recreates the pool if it was torn down."""
+    try:
+        return Redis(connection_pool=get_pool())
+    except (RuntimeError, Exception):
+        logger.debug("redis pool disconnected, recreating", exc_info=True)
+        disconnect_pool()
+        return Redis(connection_pool=get_pool())

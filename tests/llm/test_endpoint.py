@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 import pytest
@@ -9,26 +8,17 @@ from orchestration.llm.router import build_client
 
 @pytest.fixture(autouse=True)
 async def _reset_redis_pool():
-    """build_client now touches Redis (rate-limit acquire). The shared
-    connection pool binds to the first event loop it sees, so we tear it
-    down between tests to keep pytest-asyncio's per-function loop scope
-    working. yield before teardown so the test itself runs cleanly first."""
+    """Tear down Redis pool + rate-limit buckets between tests."""
     yield
     try:
-        from orchestration.storage import redis as redis_mod
+        from orchestration.storage.redis import disconnect_pool
 
-        pool = redis_mod._pool
-        if pool is not None:
-            try:
-                await asyncio.shield(pool.disconnect())
-            except (RuntimeError, Exception):
-                pass
-        redis_mod._pool = None
+        disconnect_pool()
         from orchestration.llm import rate_limit
 
         rate_limit.reset_buckets()
     except Exception:
-        pass  # safe to swallow during teardown with other tests
+        pass
 
 
 async def test_openai_client_built():
