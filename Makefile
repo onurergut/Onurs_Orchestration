@@ -35,8 +35,11 @@ e2e-m2:
 		async with session_scope() as s: \
 			pid = uuid4(); \
 			s.add(Project(id=pid, name='demo', repo_url='/tmp/repo')); \
+			await s.flush(); \
 			tid = uuid4(); s.add(Task(id=tid, project_id=pid, external_id='T1', source_type='csv', title='Add hello world', description='Print hello')); \
+			await s.flush(); \
 			rid = uuid4(); s.add(Run(id=rid, project_id=pid, task_id=tid, flow_uuid=uuid4(), idempotency_key=str(rid))); \
+			await s.flush(); \
 			print(rid); \
 	asyncio.run(main())" \
 	| tail -1 | xargs -I {} python -m orchestration.workers.orchestrator_worker {}
