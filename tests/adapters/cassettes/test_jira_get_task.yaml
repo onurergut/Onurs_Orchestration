@@ -1,0 +1,26 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Authorization:
+      - Basic dGVzdEBleGFtcGxlLmNvbTp0ZXN0LXRva2Vu
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-jira-adapter
+    method: GET
+    uri: https://example.atlassian.net/rest/api/3/issue/PROJ-1?fields=summary%2Cdescription%2Cstatus%2Cpriority%2Cassignee%2Creporter%2Clabels%2Ccreated%2Cupdated%2Cissuetype
+  response:
+    body:
+      string: '{"id":"1","key":"PROJ-1","self":"https://example.atlassian.net/rest/api/3/issue/1","fields":{"summary":"First
+        ticket","description":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"First
+        body"}]}]},"status":{"name":"To Do","statusCategory":{"key":"new"}},"priority":{"name":"Medium"},"assignee":{"displayName":"Alice","accountId":"acc-1"},"reporter":{"displayName":"Bob","accountId":"acc-2"},"labels":["urgent"],"created":"2024-06-01T00:00:00Z","updated":"2024-06-02T00:00:00Z","issuetype":{"name":"Task"}}}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,26 @@
+interactions:
+- request:
+    body: '{"body": {"type": "doc", "version": 1, "content": [{"type": "paragraph",
+      "content": [{"type": "text", "text": "build failed, retrying"}]}]}}'
+    headers:
+      Accept:
+      - application/json
+      Authorization:
+      - Basic dGVzdEBleGFtcGxlLmNvbTp0ZXN0LXRva2Vu
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-jira-adapter
+    method: POST
+    uri: https://example.atlassian.net/rest/api/3/issue/PROJ-50/comment
+  response:
+    body:
+      string: '{"id":"40001","body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"build
+        failed, retrying"}]}]},"created":"2024-06-12T00:00:00Z"}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 201
+      message: Created
+version: 1

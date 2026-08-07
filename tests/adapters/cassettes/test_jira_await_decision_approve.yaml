@@ -1,0 +1,47 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Authorization:
+      - Basic dGVzdEBleGFtcGxlLmNvbTp0ZXN0LXRva2Vu
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-jira-adapter
+    method: GET
+    uri: https://example.atlassian.net/rest/api/3/issue/PROJ-50/comment
+  response:
+    body:
+      string: '{"comments":[],"startAt":0,"maxResults":50,"total":0}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Authorization:
+      - Basic dGVzdEBleGFtcGxlLmNvbTp0ZXN0LXRva2Vu
+      Content-Type:
+      - application/json
+      User-Agent:
+      - orchestration-jira-adapter
+    method: GET
+    uri: https://example.atlassian.net/rest/api/3/issue/PROJ-50/comment
+  response:
+    body:
+      string: '{"comments":[{"id":"30001","body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"lgtm,
+        ship it"}]}]},"author":{"displayName":"reviewer"},"created":"2024-06-11T00:00:00Z"}],"startAt":0,"maxResults":50,"total":1}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1
