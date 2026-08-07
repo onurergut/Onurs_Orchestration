@@ -17,6 +17,9 @@ dependencies = [
   "httpx>=0.28",
   "structlog>=24.4",
   "python-multipart>=0.0.20",
+  "passlib[bcrypt]>=1.7",
+  # passlib 1.7.4 doesn't recognise bcrypt >=4.1 (drops __about__); pin to 4.0.x.
+  "bcrypt<4.1",
 ]
 
 [project.optional-dependencies]
