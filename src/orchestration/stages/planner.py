@@ -35,5 +35,10 @@ class PlannerStage(StageCrew):
             output_pydantic=Plan,
         )
         crew = Crew(agents=[self.agent], tasks=[task])
-        result = crew.kickoff()
+        # CrewAI's Crew.kickoff() is synchronous and cannot be called from a
+        # running event loop. PlannerStage.run is async, so use kickoff_async.
+        if hasattr(crew, "kickoff_async"):
+            result = await crew.kickoff_async()
+        else:
+            result = crew.kickoff()
         return Plan.model_validate(result.pydantic)

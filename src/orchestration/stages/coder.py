@@ -38,5 +38,8 @@ class CoderStage(StageCrew):
             output_pydantic=CodeChange,
         )
         crew = Crew(agents=[self.agent], tasks=[task])
-        result = crew.kickoff()
+        if hasattr(crew, "kickoff_async"):
+            result = await crew.kickoff_async()
+        else:
+            result = crew.kickoff()
         return CodeChange.model_validate(result.pydantic)
