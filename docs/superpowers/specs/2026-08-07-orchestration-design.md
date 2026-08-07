@@ -132,34 +132,139 @@ OpenAPI auto-generated.
 
 CrewAI Flow state machine. Determines next stage, handles resume, routes conditionally, enforces budget guard.
 
+The code below is the concrete `crewai` 1.15.12 API surface (verified in `docs/spike-m1.md`); it is the pattern copied into M2/Task 20.
+
 ```python
+from uuid import UUID, uuid4
+
+from crewai.flow import (
+    Flow,
+    FlowPersistence,
+    CheckpointConfig,
+    and_,
+    listen,
+    persist,
+    start,
+)
+from pydantic import BaseModel, Field
+
+
+class OrchestratorState(BaseModel):
+    # Library-required: @persist() refuses to stamp a state without an `id`
+    # field. The runtime uses this as the primary key in the persistence
+    # backend (SQLiteFlowPersistence.flow_states by default). It is the
+    # flow's persistence key, NOT the user-facing run identifier — for
+    # that, see `run_id` below.
+    id: UUID = Field(default_factory=uuid4)
+
+    run_id: UUID            # application-level orchestration run id
+    project_id: UUID
+    task_id: str
+    completed_stages: set[str] = Field(default_factory=set)
+    stage_artifacts: dict[str, Artifact] = Field(default_factory=dict)
+    external_receipts: dict[str, Receipt] = Field(default_factory=dict)
+    decision: Decision | None = None
+
+
+@persist()
 class OrchestratorFlow(Flow[OrchestratorState]):
     @start()
     def load_context(self): ...
+
     @listen(load_context)
     def planner_stage(self): ...
+
     @router(planner_stage)
     def route_after_planner(self) -> str: ...
+
     @listen(route_after_planner)
     def coder_stage(self): ...
-    # tester_stage + security_stage run in parallel after coder
+
+    # tester_stage + security_stage run in parallel after coder; the
+    # runtime fans branches out via the default ThreadPoolExecutor and
+    # the @listen(and_(...)) join only fires once both have completed.
     @listen(and_(tester_stage, security_stage))  # join
     def reviewer_stage(self): ...
+
     # ... docs, human_review
 ```
 
-State:
+**Persistence + checkpoint wiring (per `docs/spike-m1.md`):**
+
 ```python
-class OrchestratorState(BaseModel):
-    run_id: UUID
-    flow_uuid: UUID
-    project_id: UUID
-    task_id: str
-    completed_stages: set[str]
-    stage_artifacts: dict[str, Artifact]
-    external_receipts: dict[str, Receipt]
-    decision: Decision | None
+flow = OrchestratorFlow(
+    persistence=FlowPersistence(),                   # SQLiteFlowPersistence by default
+    checkpoint=CheckpointConfig(
+        location="./.checkpoints",
+        on_events=["*"],                             # or a tighter event list
+    ),
+)
+result = flow.kickoff()                              # sync; see notes below
 ```
+
+The two equivalent ways to wire persistence are the class-level `@persist()`
+decorator (shown above) and the constructor `persistence=` argument. The
+spike showed both work; either is acceptable. The library's
+`default_flow_persistence()` is a `SQLiteFlowPersistence` at a user-data
+path, fine for the spike but not for production — the M2/M3 work to swap in a
+Postgres-backed `FlowPersistence` is out of scope for the spec.
+
+#### CrewAI Flow adaptation notes
+
+- **`kickoff()` is sync.** `kickoff_async()` is the async variant. Async
+  callers (FastAPI, asyncio) must use `kickoff_async()` directly or wrap the
+  sync call in `asyncio.to_thread(flow.kickoff)`. The parallel-stage
+  implementation underneath is `asyncio.gather` over `_execute_method`
+  tasks, so async listeners receive true async semantics; sync listeners
+  run on the default ThreadPoolExecutor.
+
+- **`restore_from_state_id` forks, not resumes.** The runtime hydrates
+  `self.state` from the persisted snapshot, mints a fresh `id`, then runs
+  every method on the flow from `@start` again. Each stage is therefore
+  executed at least twice on restore — the first time it ran originally,
+  and again on the restored flow. Stages MUST self-guard via
+  `completed_stages`:
+  ```python
+  @listen(load_context)
+  def planner_stage(self):
+      if "planner_stage" in self.state.completed_stages:
+          return
+      # ... do work, then:
+      self.state.completed_stages.add("planner_stage")
+  ```
+  The contract is "every stage is idempotent on `completed_stages`
+  membership." If true resume semantics (skip already-completed methods)
+  are needed, use `Flow.from_checkpoint` / `Flow.fork` against the
+  `CheckpointConfig` JSON artifacts instead of `restore_from_state_id`.
+
+- **`@persist()` is metadata only and MUST be called with parens.** Bare
+  `@persist` silently replaces the wrapped method with `persist`'s inner
+  closure, producing empty state at runtime. Actual persistence is driven
+  by the Flow's `persistence=` constructor argument
+  (`SQLiteFlowPersistence` by default) or by `default_flow_persistence()`
+  when neither decorator nor constructor injection is supplied.
+
+- **`checkpoint=True` writes nothing for a Flow.** The default-on-True
+  config (`CheckpointConfig(on_events=["task_completed"])`) targets a Crew
+  event Flow never fires. Pass an explicit
+  `CheckpointConfig(location=..., on_events=["*"])` or a tighter list
+  (e.g. `["flow_started", "method_execution_finished", "flow_finished"]`)
+  to get useful artifacts.
+
+- **`flow_uuid` collapsed into `id`.** The original spec carried a
+  `flow_uuid: UUID` field. The library's persistence key is `state.id` —
+  there is no `flow_uuid` in the library API. The `flow_uuid` field was
+  removed; `state.id` is the persistence key and `state.run_id` is the
+  application-level orchestration run identifier. The two are distinct
+  concerns: `id` is generated per Flow instance by `uuid4()` and is what
+  the persistence backend indexes by; `run_id` is assigned upstream by
+  the API/DB layer and is what users see in `GET /runs/{rid}`.
+
+- **`pyproject.toml` floor tightening.** `pyproject.toml` pins
+  `crewai>=0.86`, which resolves to 1.15.12 today but leaves the spec
+  exposed to whatever minor version the lockfile picks up. Recommend
+  tightening to `crewai>=1.15,<2` so CI reproducibly resolves to the API
+  surface documented here.
 
 ### 5.3 Stage Crews (`src/orchestration/stages/`)
 
