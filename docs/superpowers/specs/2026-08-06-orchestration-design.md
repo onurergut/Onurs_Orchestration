@@ -1,3 +1,5 @@
+> **SUPERSEDED** — see [`2026-08-07-orchestration-design.md`](./2026-08-07-orchestration-design.md) for the resolved/authoritative spec. This file is retained for historical reference only; do NOT implement against it.
+
 # Orchestration System — Design Spec
 
 **Date:** 2026-08-06
