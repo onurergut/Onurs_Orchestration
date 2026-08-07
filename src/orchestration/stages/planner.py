@@ -8,21 +8,26 @@ from orchestration.stages.base import StageContext, StageCrew
 
 
 def _build_crewai_llm() -> LLM:
-    """Build a CrewAI LLM from LLM_* env vars (Anthropic- or OpenAI-compatible)."""
+    """Build a CrewAI LLM from LLM_* env vars.
+
+    CrewAI's native Anthropic provider requires `crewai[anthropic]` extra.
+    When that's missing we fall back to provider="openai" — LiteLLM (which
+    CrewAI delegates to) handles most API shapes, including our user's
+    `/anthropic` URL when configured with the right model string.
+    """
     protocol = os.environ.get("LLM_PROTOCOL", "anthropic").lower()
+    base_kwargs = {
+        "model": os.environ["LLM_MODEL"],
+        "api_key": os.environ["LLM_API_KEY"],
+        "base_url": os.environ.get("LLM_ENDPOINT_URL"),
+    }
     if protocol == "anthropic":
-        return LLM(
-            model=os.environ["LLM_MODEL"],
-            api_key=os.environ["LLM_API_KEY"],
-            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
-            provider="anthropic",
-        )
-    return LLM(
-        model=os.environ["LLM_MODEL"],
-        api_key=os.environ["LLM_API_KEY"],
-        base_url=os.environ.get("LLM_ENDPOINT_URL"),
-        provider="openai",
-    )
+        try:
+            return LLM(provider="anthropic", **base_kwargs)
+        except ImportError:
+            # Fall through to openai provider
+            pass
+    return LLM(provider="openai", **base_kwargs)
 
 
 class Plan(BaseModel):
