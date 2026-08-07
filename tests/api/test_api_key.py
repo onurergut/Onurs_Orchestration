@@ -1,10 +1,10 @@
 import pytest
 from sqlalchemy import insert
+from tests.conftest import _hash_key  # re-export helper
 
 from orchestration.storage.db import get_session_factory
 from orchestration.storage.models.api_key import ApiKey
 from orchestration.storage.models.user import User
-from tests.conftest import _hash_key  # re-export helper
 
 
 @pytest.mark.asyncio

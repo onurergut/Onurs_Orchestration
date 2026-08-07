@@ -8,7 +8,7 @@ from orchestration.storage.models.api_key import ApiKey
 from orchestration.storage.models.user import User
 
 
-async def get_session() -> AsyncSession:
+async def get_session() -> AsyncSession:  # type: ignore[misc]  # async generator yield, FastAPI dependency
     factory = get_session_factory()
     async with factory() as session:
         yield session

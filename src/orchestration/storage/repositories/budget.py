@@ -36,7 +36,7 @@ async def record_spend(project_id: UUID, amount_usd: float, run_id: UUID | None)
             last_run_id=run_id,
         ).on_conflict_do_update(
             index_elements=["project_id", "month"],
-            set_=dict(spent_usd=BudgetState.spent_usd + amount_usd, last_run_id=run_id),
+            set_={"spent_usd": BudgetState.spent_usd + amount_usd, "last_run_id": run_id},
         )
         await session.execute(stmt)
 

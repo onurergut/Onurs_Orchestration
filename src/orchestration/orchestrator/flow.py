@@ -5,8 +5,6 @@ from pathlib import Path
 from crewai.flow.flow import Flow, and_, listen, start
 from sqlalchemy import select
 
-from orchestration.adapters.review.web_ui import WebUiAdapter
-from orchestration.adapters.task_source.csv import CsvAdapter
 from orchestration.llm.endpoint import LLMEndpoint
 from orchestration.llm.router import build_client
 from orchestration.observability.audit_middleware import stage_audit
@@ -23,7 +21,6 @@ from orchestration.storage.db import session_scope
 from orchestration.storage.models.run import Run
 from orchestration.storage.models.task import Task
 from orchestration.storage.repositories import audit as audit_repo
-from orchestration.git.worktree import WorktreeManager
 
 
 def _record_stage_duration(stage: str, start: float) -> None:

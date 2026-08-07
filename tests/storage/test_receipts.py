@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from orchestration.storage.db import session_scope
 from orchestration.storage.models.external_receipt import ExternalReceipt
@@ -8,7 +9,6 @@ from orchestration.storage.models.project import Project
 from orchestration.storage.models.run import Run
 from orchestration.storage.models.task import Task
 from orchestration.storage.repositories.receipts import with_receipt
-from sqlalchemy import select
 
 
 async def _seed_run() -> uuid.UUID:
@@ -36,17 +36,16 @@ async def _seed_run() -> uuid.UUID:
 async def test_receipt_first_call_executes_and_caches():
     run_id = await _seed_run()
     key = f"test:{run_id}:create"
-    async with session_scope() as session:
-        async with with_receipt(
-            session,
-            run_id=run_id,
-            idempotency_key=key,
-            adapter_type="test",
-            operation="create",
-            request_payload={"x": 1},
-        ) as ctx:
-            assert ctx.cached is False
-            ctx.response = {"id": "created-1"}
+    async with session_scope() as session, with_receipt(
+        session,
+        run_id=run_id,
+        idempotency_key=key,
+        adapter_type="test",
+        operation="create",
+        request_payload={"x": 1},
+    ) as ctx:
+        assert ctx.cached is False
+        ctx.response = {"id": "created-1"}
 
     async with session_scope() as session:
         rows = (await session.execute(
@@ -61,20 +60,18 @@ async def test_receipt_first_call_executes_and_caches():
 async def test_receipt_second_call_returns_cached():
     run_id = await _seed_run()
     key = f"test:{run_id}:dedup"
-    async with session_scope() as session:
-        async with with_receipt(
-            session, run_id=run_id, idempotency_key=key,
-            adapter_type="test", operation="create", request_payload={"x": 1},
-        ) as ctx:
-            ctx.response = {"id": "first"}
+    async with session_scope() as session, with_receipt(
+        session, run_id=run_id, idempotency_key=key,
+        adapter_type="test", operation="create", request_payload={"x": 1},
+    ) as ctx:
+        ctx.response = {"id": "first"}
 
-    async with session_scope() as session:
-        async with with_receipt(
-            session, run_id=run_id, idempotency_key=key,
-            adapter_type="test", operation="create", request_payload={"x": 1},
-        ) as ctx:
-            assert ctx.cached is True
-            assert ctx.response == {"id": "first"}
+    async with session_scope() as session, with_receipt(
+        session, run_id=run_id, idempotency_key=key,
+        adapter_type="test", operation="create", request_payload={"x": 1},
+    ) as ctx:
+        assert ctx.cached is True
+        assert ctx.response == {"id": "first"}
 
     async with session_scope() as session:
         rows = (await session.execute(

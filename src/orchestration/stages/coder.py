@@ -1,8 +1,6 @@
-import os
-from pathlib import Path
 
+from crewai import Agent, Crew, Task
 from pydantic import BaseModel
-from crewai import Agent, Crew, LLM, Task
 
 from orchestration.llm.client import LLMClient
 from orchestration.stages.base import StageContext, StageCrew
@@ -46,4 +44,4 @@ class CoderStage(StageCrew):
             result = await crew.kickoff_async()
         else:
             result = crew.kickoff()
-        return CodeChange.model_validate(result.pydantic)
+        return CodeChange.model_validate(result.pydantic)  # type: ignore[union-attr]

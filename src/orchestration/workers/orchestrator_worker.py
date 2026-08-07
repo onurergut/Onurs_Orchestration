@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -23,7 +23,7 @@ async def run_flow(run_id: UUID) -> None:
         await session.execute(
             update(Run)
             .where(Run.id == run_id)
-            .values(status="running", started_at=datetime.now(timezone.utc))
+            .values(status="running", started_at=datetime.now(UTC))
         )
 
     state = OrchestratorState(
@@ -53,7 +53,7 @@ async def run_flow(run_id: UUID) -> None:
             await session.execute(
                 update(Run)
                 .where(Run.id == run_id)
-                .values(status=terminal_status, finished_at=datetime.now(timezone.utc))
+                .values(status=terminal_status, finished_at=datetime.now(UTC))
             )
 
 

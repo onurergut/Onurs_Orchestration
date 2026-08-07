@@ -2,7 +2,12 @@ import csv as csvlib
 from pathlib import Path
 from uuid import UUID
 
-from orchestration.adapters.task_source.base import Comment, CreateTask, ExternalTask, TaskSourceAdapter
+from orchestration.adapters.task_source.base import (
+    Comment,
+    CreateTask,
+    ExternalTask,
+    TaskSourceAdapter,
+)
 
 
 class CsvAdapter(TaskSourceAdapter):

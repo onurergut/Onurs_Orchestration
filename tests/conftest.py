@@ -1,4 +1,3 @@
-import asyncio
 import os
 from collections.abc import AsyncIterator
 
@@ -8,14 +7,14 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://orchestration:orchestration@localhost:5432/orchestration_test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/1")
 
-from passlib.hash import bcrypt as _bcrypt  # noqa: E402
+from passlib.hash import bcrypt as _bcrypt
 
 
 def _hash_key(raw: str) -> str:
     return _bcrypt.using(rounds=4).hash(raw)
 
 
-from orchestration.api.app import create_app  # noqa: E402
+from orchestration.api.app import create_app
 
 
 @pytest.fixture

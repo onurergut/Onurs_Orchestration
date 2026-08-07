@@ -20,6 +20,7 @@ class CompletionResponse(BaseModel):
 
 
 class LLMClient(Protocol):
-    endpoint_name: str
+    @property
+    def endpoint_name(self) -> str: ...
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse: ...

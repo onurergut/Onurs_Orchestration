@@ -78,9 +78,9 @@ def init_tracing() -> None:
                 OTLPSpanExporter as GrpcOTLPSpanExporter,
             )
 
-            exporter = GrpcOTLPSpanExporter(endpoint=otlp_endpoint)
+            exporter = GrpcOTLPSpanExporter(endpoint=otlp_endpoint)  # type: ignore[assignment]
     else:
-        exporter = ConsoleSpanExporter()
+        exporter = ConsoleSpanExporter()  # type: ignore[assignment]
 
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)

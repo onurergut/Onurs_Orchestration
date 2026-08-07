@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from pydantic import BaseModel
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from orchestration.llm.client import LLMClient
 

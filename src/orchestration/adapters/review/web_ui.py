@@ -4,7 +4,12 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import insert, select
 
-from orchestration.adapters.review.base import Artifacts, Decision, Receipt, ReviewSurfaceAdapter
+from orchestration.adapters.review.base import (
+    Artifacts,
+    Decision,
+    Receipt,
+    ReviewSurfaceAdapter,
+)
 from orchestration.storage.db import session_scope
 from orchestration.storage.models.audit_log import AuditLog
 from orchestration.storage.models.external_receipt import ExternalReceipt

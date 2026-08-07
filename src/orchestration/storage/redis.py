@@ -20,9 +20,9 @@ def disconnect_pool() -> None:
     global _pool
     if _pool is not None:
         try:
-            _pool.disconnect()
+            _pool.disconnect()  # type: ignore[unused-coroutine]
         except Exception:
-            pass
+            logger.debug("ignoring error disconnecting redis pool", exc_info=True)
     _pool = None
 
 
@@ -30,7 +30,7 @@ def get_redis() -> Redis:
     """Return a Redis client. Auto-recreates the pool if it was torn down."""
     try:
         return Redis(connection_pool=get_pool())
-    except (RuntimeError, Exception):
+    except Exception:
         logger.debug("redis pool disconnected, recreating", exc_info=True)
         disconnect_pool()
         return Redis(connection_pool=get_pool())

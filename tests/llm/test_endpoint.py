@@ -17,8 +17,10 @@ async def _reset_redis_pool():
         from orchestration.llm import rate_limit
 
         rate_limit.reset_buckets()
-    except Exception:
-        pass
+    except Exception as _exc:
+        import logging
+
+        logging.getLogger(__name__).debug("ignoring fixture teardown error", exc_info=True)
 
 
 async def test_openai_client_built():

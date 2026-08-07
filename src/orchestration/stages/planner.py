@@ -1,7 +1,7 @@
 import os
 
+from crewai import LLM, Agent, Crew, Task
 from pydantic import BaseModel
-from crewai import Agent, Crew, LLM, Task
 
 from orchestration.llm.client import LLMClient
 from orchestration.stages.base import StageContext, StageCrew
@@ -11,23 +11,18 @@ def _build_crewai_llm() -> LLM:
     """Build a CrewAI LLM from LLM_* env vars.
 
     CrewAI's native Anthropic provider requires `crewai[anthropic]` extra.
-    When that's missing we fall back to provider="openai" — LiteLLM (which
-    CrewAI delegates to) handles most API shapes, including our user's
-    `/anthropic` URL when configured with the right model string.
+    When that's missing we fall back to provider="openai".
     """
     protocol = os.environ.get("LLM_PROTOCOL", "anthropic").lower()
-    base_kwargs = {
-        "model": os.environ["LLM_MODEL"],
-        "api_key": os.environ["LLM_API_KEY"],
-        "base_url": os.environ.get("LLM_ENDPOINT_URL"),
-    }
+    model = os.environ["LLM_MODEL"]
+    api_key = os.environ["LLM_API_KEY"]
+    base_url = os.environ.get("LLM_ENDPOINT_URL")
     if protocol == "anthropic":
         try:
-            return LLM(provider="anthropic", **base_kwargs)
+            return LLM(model=model, api_key=api_key, base_url=base_url, provider="anthropic")  # type: ignore[arg-type]
         except ImportError:
-            # Fall through to openai provider
             pass
-    return LLM(provider="openai", **base_kwargs)
+    return LLM(model=model, api_key=api_key, base_url=base_url, provider="openai")  # type: ignore[arg-type]
 
 
 class Plan(BaseModel):
@@ -68,4 +63,4 @@ class PlannerStage(StageCrew):
             result = await crew.kickoff_async()
         else:
             result = crew.kickoff()
-        return Plan.model_validate(result.pydantic)
+        return Plan.model_validate(result.pydantic)  # type: ignore[union-attr]

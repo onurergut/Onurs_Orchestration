@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter
 from sqlalchemy import text
 
 from orchestration.storage.db import get_session_factory
