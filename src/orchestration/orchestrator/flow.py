@@ -8,6 +8,7 @@ from orchestration.adapters.review.web_ui import WebUiAdapter
 from orchestration.adapters.task_source.csv import CsvAdapter
 from orchestration.llm.endpoint import LLMEndpoint
 from orchestration.llm.router import build_client
+from orchestration.observability.audit_middleware import stage_audit
 from orchestration.orchestrator.budget_guard import check as budget_check
 from orchestration.orchestrator.state import OrchestratorState
 from orchestration.stages.coder import CoderStage
@@ -49,61 +50,64 @@ class OrchestratorFlow(Flow[OrchestratorState]):
             self.state.completed_stages = (
                 list(run.completed_stages) if run.completed_stages else []
             )
-        await audit_repo.audit(self.state.project_id, self.state.run_id, "system:orchestrator", "load_context", {})
+        async with stage_audit(self.state.project_id, self.state.run_id, "load_context"):
+            await audit_repo.audit(self.state.project_id, self.state.run_id, "system:orchestrator", "load_context", {})
 
     @listen(load_context)
     async def planner_stage(self):
         await budget_check(self.state.project_id)
         if "planner" in self.state.completed_stages:
             return
-        endpoint = LLMEndpoint(
-            name="primary",
-            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
-            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
-            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
-            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
-            tier="THINKING",
-        )
-        llm = build_client(endpoint)
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": {},
-        })()
-        plan = await PlannerStage().run(ctx, llm)
-        self.state.stage_artifacts["planner"] = plan.model_dump()
-        self.state.completed_stages.append("planner")
+        async with stage_audit(self.state.project_id, self.state.run_id, "planner"):
+            endpoint = LLMEndpoint(
+                name="primary",
+                protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+                base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+                api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+                model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+                tier="THINKING",
+            )
+            llm = build_client(endpoint)
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": {},
+            })()
+            plan = await PlannerStage().run(ctx, llm)
+            self.state.stage_artifacts["planner"] = plan.model_dump()
+            self.state.completed_stages.append("planner")
 
     @listen(planner_stage)
     async def coder_stage(self):
         await budget_check(self.state.project_id)
         if "coder" in self.state.completed_stages:
             return
-        endpoint = LLMEndpoint(
-            name="primary",
-            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
-            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
-            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
-            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
-            tier="FAST",
-        )
-        llm = build_client(endpoint)
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": self.state.stage_artifacts,
-        })()
-        code = await CoderStage().run(ctx, llm)
-        self.state.stage_artifacts["coder"] = code.model_dump()
-        self.state.completed_stages.append("coder")
+        async with stage_audit(self.state.project_id, self.state.run_id, "coder"):
+            endpoint = LLMEndpoint(
+                name="primary",
+                protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+                base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+                api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+                model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+                tier="FAST",
+            )
+            llm = build_client(endpoint)
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": self.state.stage_artifacts,
+            })()
+            code = await CoderStage().run(ctx, llm)
+            self.state.stage_artifacts["coder"] = code.model_dump()
+            self.state.completed_stages.append("coder")
 
     # ----- Parallel join: tester + security fan out from coder -----
     # Both branches carry the same decorator (``@listen(and_(coder_stage))``)
@@ -115,38 +119,40 @@ class OrchestratorFlow(Flow[OrchestratorState]):
         await budget_check(self.state.project_id)
         if "tester" in self.state.completed_stages:
             return
-        # Subprocess-only stage; pass llm=None since the protocol requires
-        # the argument but TesterStage.run ignores it.
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": self.state.stage_artifacts,
-        })()
-        report = await TesterStage().run(ctx, llm=None)
-        self.state.stage_artifacts["tester"] = report.model_dump()
-        self.state.completed_stages.append("tester")
+        async with stage_audit(self.state.project_id, self.state.run_id, "tester"):
+            # Subprocess-only stage; pass llm=None since the protocol requires
+            # the argument but TesterStage.run ignores it.
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": self.state.stage_artifacts,
+            })()
+            report = await TesterStage().run(ctx, llm=None)
+            self.state.stage_artifacts["tester"] = report.model_dump()
+            self.state.completed_stages.append("tester")
 
     @listen(and_(coder_stage))
     async def security_stage(self):
         await budget_check(self.state.project_id)
         if "security" in self.state.completed_stages:
             return
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": self.state.stage_artifacts,
-        })()
-        report = await SecurityStage().run(ctx, llm=None)
-        self.state.stage_artifacts["security"] = report.model_dump()
-        self.state.completed_stages.append("security")
+        async with stage_audit(self.state.project_id, self.state.run_id, "security"):
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": self.state.stage_artifacts,
+            })()
+            report = await SecurityStage().run(ctx, llm=None)
+            self.state.stage_artifacts["security"] = report.model_dump()
+            self.state.completed_stages.append("security")
 
     # ----- Reviewer joins both parallel branches -----
     @listen(and_(tester_stage, security_stage))
@@ -154,51 +160,53 @@ class OrchestratorFlow(Flow[OrchestratorState]):
         await budget_check(self.state.project_id)
         if "reviewer" in self.state.completed_stages:
             return
-        endpoint = LLMEndpoint(
-            name="primary",
-            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
-            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
-            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
-            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
-            tier="THINKING",
-        )
-        llm = build_client(endpoint)
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": self.state.stage_artifacts,
-        })()
-        review = await ReviewerStage().run(ctx, llm)
-        self.state.stage_artifacts["reviewer"] = review.model_dump()
-        self.state.completed_stages.append("reviewer")
+        async with stage_audit(self.state.project_id, self.state.run_id, "reviewer"):
+            endpoint = LLMEndpoint(
+                name="primary",
+                protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+                base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+                api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+                model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+                tier="THINKING",
+            )
+            llm = build_client(endpoint)
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": self.state.stage_artifacts,
+            })()
+            review = await ReviewerStage().run(ctx, llm)
+            self.state.stage_artifacts["reviewer"] = review.model_dump()
+            self.state.completed_stages.append("reviewer")
 
     @listen(reviewer_stage)
     async def docs_stage(self):
         await budget_check(self.state.project_id)
         if "docs" in self.state.completed_stages:
             return
-        endpoint = LLMEndpoint(
-            name="primary",
-            protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
-            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
-            api_key=os.environ.get("LLM_API_KEY", "sk-test"),
-            model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
-            tier="THINKING",
-        )
-        llm = build_client(endpoint)
-        ctx = type("Ctx", (), {
-            "run_id": self.state.run_id,
-            "project_id": self.state.project_id,
-            "task_external_id": self.state.task_external_id,
-            "task_title": self.state.task_title,
-            "task_description": self.state.task_description,
-            "worktree_path": Path(self.state.worktree_path),
-            "previous_artifacts": self.state.stage_artifacts,
-        })()
-        update = await DocsStage().run(ctx, llm)
-        self.state.stage_artifacts["docs"] = update.model_dump()
-        self.state.completed_stages.append("docs")
+        async with stage_audit(self.state.project_id, self.state.run_id, "docs"):
+            endpoint = LLMEndpoint(
+                name="primary",
+                protocol=os.environ.get("LLM_PROTOCOL", "anthropic"),
+                base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+                api_key=os.environ.get("LLM_API_KEY", "sk-test"),
+                model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5"),
+                tier="THINKING",
+            )
+            llm = build_client(endpoint)
+            ctx = type("Ctx", (), {
+                "run_id": self.state.run_id,
+                "project_id": self.state.project_id,
+                "task_external_id": self.state.task_external_id,
+                "task_title": self.state.task_title,
+                "task_description": self.state.task_description,
+                "worktree_path": Path(self.state.worktree_path),
+                "previous_artifacts": self.state.stage_artifacts,
+            })()
+            update = await DocsStage().run(ctx, llm)
+            self.state.stage_artifacts["docs"] = update.model_dump()
+            self.state.completed_stages.append("docs")
