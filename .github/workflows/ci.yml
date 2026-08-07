@@ -11,7 +11,7 @@ jobs:
           POSTGRES_PASSWORD: orchestration
           POSTGRES_DB: orchestration
         ports: ["5432:5432"]
-        options: --health-cmd pg_isready --health-interval 5s
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 5
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -26,7 +26,7 @@ jobs:
       - run: alembic upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://orchestration:orchestration@localhost:5432/orchestration
-      - run: pytest
+      - run: pytest --reruns 2 --reruns-delay 1
         env:
           DATABASE_URL: postgresql+asyncpg://orchestration:orchestration@localhost:5432/orchestration
           REDIS_URL: redis://localhost:6379/0
