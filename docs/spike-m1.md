@@ -319,7 +319,168 @@ and constructor kwargs are `persistence=` (a `FlowPersistence` instance) and
 
 * §5.2's "`async def` test with `await flow.kickoff()`" pattern needs to use
   `await flow.kickoff_async()` (or be plain sync with `flow.kickoff()`).
+* §5.2's `tester_stage + security_stage` fan-out pattern (one parent,
+  two parallel branches, one join) maps onto `@listen(and_(branch_a,
+  branch_b))` for the join — see the next section for the runtime
+  mechanics and what we actually observed.
 * The `pyproject.toml` `crewai>=0.86` floor is fine, but the spec code
   samples are pinned to ~0.86. After M1 we should either tighten the floor
   (`crewai>=1.15`) or update the samples to match whichever version the
   CI environment actually resolves.
+
+## Parallel stages findings
+
+Task 10 verified the spec §5.2 fan-out pattern: a single `@start`
+parent followed by two `@listen(parent)` branches and a downstream
+`@listen(and_(branch_a, branch_b))` join. Two tests now live in
+`tests/spike/test_flow_basics.py` (`test_parallel_join` and
+`test_parallel_join_blocks_until_both_complete`); both pass and use
+real `time.monotonic()` timestamps to prove the branches overlapped
+rather than serialised.
+
+### `and_(a, b)` is the real API, imported from `crewai.flow`
+
+The brief wrote `from crewai.flow.flow import and_, listen, start`,
+which is wrong for crewai 1.15.12 — `and_` and `or_` live on the
+top-level `crewai.flow` package and originate in
+`crewai.flow.dsl._conditions`. They are pure data builders: each
+returns a `FlowCondition` dict of the form
+
+```python
+{"type": "AND_CONDITION", "conditions": [name_a, name_b]}
+# or, with nesting:
+{"type": "AND_CONDITION", "conditions": [{"type": "OR_CONDITION", ...}, name_c]}
+```
+
+so they compose: `@listen(and_(or_(x, y), z))` works and builds a
+nested dict. The runtime walks this structure in
+`_condition_satisfied` (top-level `crewai/flow/runtime/__init__.py`,
+around lines 165–178), which delegates to the
+`combine(_condition_satisfied(...) for ...)` helper. There is no
+separate "AND condition" Python class — it is just a nested dict, so
+any equality / hashing assumptions in downstream code should match
+that.
+
+### Branches really do run in parallel — but as threads, not processes
+
+Listeners triggered by the same event are not run sequentially. The
+runtime's `_dispatch_listener_completion` (lines ~3060–3104 in the
+runtime `__init__.py`) finds every listener whose condition is
+satisfied by the current trigger and, for those that are *not* an
+OR-race group, schedules them via:
+
+```python
+tasks = [
+    self._execute_single_listener(name, listener_result, ...)
+    for name in listeners_triggered
+]
+await asyncio.gather(*tasks)
+```
+
+Each task calls `_execute_method`, which dispatches the body:
+
+* async methods (`async def branch_a(...)`) are awaited inline on the
+  event loop;
+* sync methods (`def branch_a(...)`) are run via
+  `await asyncio.to_thread(ctx.run, method, *args, **kwargs)` — i.e. on
+  the default `ThreadPoolExecutor`.
+
+So a fan-out from `init` to two sync branches produces two threads,
+both blocked on the same `kickoff()` call. The spike's
+`test_parallel_join` proves this by sleeping 50 ms in each branch and
+asserting the joint wall-clock window is well under 100 ms — it ran in
+~50 ms. **Concurrent I/O-bound sync work is fine. CPU-bound sync work
+would contend on the GIL; if a branch needs to release the GIL, write
+it as `async def` and `await` its awaits.** That is the contract for
+spec §5.2's `tester_stage` and `security_stage`: as long as their work
+is network-/LLM-bound (it will be — both stages call external APIs),
+they will overlap.
+
+Note: `Flow.kickoff()` is the synchronous wrapper around
+`kickoff_async()` — it calls `asyncio.run(_run_flow())` (or, if a
+loop is already running, runs `_run_flow` in a single-thread
+`ThreadPoolExecutor`). So the parallelism is implemented in terms of
+threads and an event loop, **not** separate processes. The default
+thread pool is `min(32, os.cpu_count() + 4)`, which is plenty for the
+spec's two-branch fan-out but is worth remembering if M1 grows the
+fan-out to many branches.
+
+### How `join` waits for both branches
+
+`and_(branch_a, branch_b)` produces an AND condition dict. When
+`branch_a` completes, the runtime calls `_condition_met` for `join`,
+which appends `branch_a` to the listener's `seen` set; if the AND is
+not yet satisfied (because `branch_b` has not fired), `_condition_met`
+returns `False` and `join` is **not** scheduled. When `branch_b`
+completes, `_condition_met` is called again, both triggers are in
+`seen`, `_condition_satisfied` returns `True`, and `join` is finally
+dispatched. The order in which the two branches complete is irrelevant
+— the second one to fire is what unblocks the join. This was the
+exact thing tested in `test_parallel_join_blocks_until_both_complete`:
+`fast_branch` finished immediately, but the runtime held `join` back
+until the deliberately-slowed `slow_branch` (50 ms sleep) also
+completed.
+
+### What happens if one branch raises?
+
+This was not exhaustively tested, but the dispatch path is:
+`_execute_single_listener` catches exceptions in
+`_execute_method`'s try/except and propagates them into the
+`asyncio.gather(..., return_exceptions=False)` (default) at line 3104,
+which re-raises the first exception. Concretely:
+
+* a branch that raises will fail the whole `kickoff()` call (the
+  exception propagates up through `kickoff_async` and out of
+  `kickoff`);
+* `join` will *not* be scheduled, because the failed branch's
+  `_completed_methods` entry is never added (it lives in the try
+  block, after the method returns successfully — see
+  `_execute_method` line 2868);
+* the failed branch's exception is raised to the caller of
+  `kickoff()`, so the orchestrator / API layer will need a try/except
+  around `kickoff()` (or to use `kickoff_async()` and handle
+  exceptions there).
+
+This is worth a follow-up test in M2 once the orchestrator code paths
+are wired up — the spike did not want to assert on a behaviour that
+might reasonably change between minor versions.
+
+### State sharing between parallel branches — caveat
+
+All branches share `self.state` on the same `Flow` instance. Pydantic
+`BaseModel` is not thread-safe for arbitrary attribute mutation. In
+this spike we are safe because:
+
+* each branch writes its own distinct fields (`a_done`, `b_started_at`,
+  etc.);
+* `join` runs **after both branches finish** (in `_execute_single_listener`'s
+  outer `await`), so it never races with a branch's writes.
+
+If M1 needs cross-branch shared state (e.g. one branch accumulates
+tokens spent, the other reads them), put a `threading.Lock` on the
+state and acquire it in every read/write, or use a thread-safe
+primitive (`queue.Queue`, `itertools.count`, `multiprocessing.Value`).
+The default `BaseModel` attribute write is atomic-enough at the
+attribute level for small scalars but not for compound updates
+(`self.state.counter += 1` is a read-modify-write race even on a
+single int). For the production fan-out, **avoid shared mutable
+state in branches** and let `join` aggregate branch-local results
+instead.
+
+### Other minor observations
+
+* The condition dict from `and_`/`or_` uses string keys `"and"` / `"or"`
+  at one layer of coercion (`_to_definition_condition` in
+  `_conditions.py`), and the runtime's `_condition_branches` looks
+  for `"and"` / `"or"` keys. If you build a condition by hand rather
+  than via `and_(...)` / `or_(...)`, mirror those keys exactly.
+* `@listen(and_(branch_a, branch_b))` does **not** receive the
+  upstream return value as a useful payload — by the time `join`
+  fires, both `branch_a` and `branch_b` have produced their results
+  but the runtime passes only a synthesised trigger (typically the
+  triggering event's payload, which may be `None`). If `join` needs
+  the branches' outputs, have each branch stash its result on
+  `self.state` and read from there.
+* `@router` paths are orthogonal to this — a router picks exactly
+  one branch based on a Python predicate, and the unselected branches
+  do not run. The AND-join pattern is for *every* branch must run.
