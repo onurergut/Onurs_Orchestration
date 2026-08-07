@@ -59,7 +59,7 @@ model name, and protocol (`openai` or `anthropic`). Tier-aware (FAST/THINKING),
 circuit breaker (closed/open/half-open, 5-failure threshold, 60s reset), per-provider
 rate limiter (Redis-backed token bucket), and fallback chain.
 
-Tested end-to-end with **MiniMax-M3** at `api.minimax.io`.
+Works with any OpenAI-compatible or Anthropic-compatible endpoint. End-to-end verified.
 
 ### Operational
 
@@ -119,9 +119,9 @@ REVIEW_SURFACE_TYPE=web_ui
 
 # LLM endpoint (Anthropic-compatible example)
 LLM_PROTOCOL=anthropic
-LLM_ENDPOINT_URL=https://api.minimax.io/anthropic
+LLM_ENDPOINT_URL=https://api.anthropic.com
 LLM_API_KEY=sk-...
-LLM_MODEL=MiniMax-M3
+LLM_MODEL=claude-sonnet-4-5
 
 # Auth
 API_KEY_HEADER=X-API-Key
@@ -173,7 +173,7 @@ tests/
 | Tag | What |
 |---|---|
 | `m0-foundation` | Scaffolding, Docker, FastAPI + Auth + DB + CI |
-| `m2-vertical-slice` | End-to-end Planner+Coder via MiniMax-M3 (live E2E verified) |
+| `m2-vertical-slice` | End-to-end Planner+Coder via live LLM (E2E verified) |
 | `m3-full-pipeline` | 7-stage pipeline + audit middleware |
 | `m4-real-adapters` | GitHub, Jira, Linear, Slack (VCR cassette tests) |
 | `m5-suggestion-and-eval` | SuggestionEngine + picker API + SWE-bench seed + runner |
