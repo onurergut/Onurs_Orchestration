@@ -30,6 +30,7 @@ dev = [
   "ruff>=0.8",
   "mypy>=1.13",
   "testcontainers[postgres,redis]>=4.8",
+  "bandit>=1.7",
 ]
 
 [build-system]
