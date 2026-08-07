@@ -484,3 +484,150 @@ instead.
 * `@router` paths are orthogonal to this — a router picks exactly
   one branch based on a Python predicate, and the unselected branches
   do not run. The AND-join pattern is for *every* branch must run.
+
+## Idempotency contract
+
+Task 11 spike result. Spec §5 requires that every external side-effect
+(a Jira/Linear/GitHub ticket create, an LLM API call that bills, a
+push to a remote worktree, etc.) be safe to retry. The mechanism is a
+deterministic `idempotency_key` and a Postgres-backed
+`external_receipts` table (see migration `001_initial_schema`) — every
+adapter call consults that table before executing, and on retry/resume
+short-circuits if a successful receipt already exists.
+
+The contract is verified end-to-end in
+`tests/spike/test_idempotency.py` against the real Postgres test DB,
+using a `FakeTaskSourceAdapter` that mirrors what the M2
+`TaskSourceAdapter` / `CsvAdapter` pair will look like. The M2 adapters
+themselves don't exist yet, so the spike exercises the *pattern* with
+a small in-test fake rather than importing code that's out of scope.
+
+### Reference shape — `FakeTaskSourceAdapter`
+
+```python
+async def create_external_task(self, run_id: UUID, external_id: str,
+                               operation: str = "create") -> dict:
+    key = f"{self.name}:{external_id}:{operation}"
+    async with session_scope() as session:
+        existing = (await session.execute(
+            select(ExternalReceipt).where(
+                ExternalReceipt.idempotency_key == key
+            )
+        )).scalar_one_or_none()
+
+        if existing is not None and existing.status == "succeeded":
+            cached = dict(existing.response_payload or {})
+            cached["reused"] = True
+            return cached
+
+        # Fresh path: execute + persist in the same transaction.
+        self.calls.append(f"{external_id}:{operation}")
+        payload = {"external_id": external_id, "operation": operation, ...}
+        session.add(ExternalReceipt(
+            run_id=run_id,
+            idempotency_key=key,
+            adapter_type=self.name,
+            operation=operation,
+            external_id=external_id,
+            request_payload={"external_id": external_id},
+            response_payload=payload,
+            status="succeeded",
+        ))
+        return payload
+```
+
+### The six rules
+
+Every adapter call MUST follow all six:
+
+1. **Compute `idempotency_key` deterministically from `(adapter_type,
+   external_id, operation)`** — and, in production, `project_id` and
+   `stage`. The key MUST be a pure function of those inputs; nothing
+   from the external system's response (no `external_ref` returned by
+   the API) may enter the key, or a retry after a partial failure
+   would compute a *different* key and double-execute. See
+   `FakeTaskSourceAdapter.create_external_task` (`tests/spike/test_idempotency.py`).
+
+2. **Before executing, query `external_receipts` for an existing row
+   with that key.** The lookup MUST happen in the same DB session that
+   will write the new row, so the dedup check and the insert see a
+   consistent snapshot. `SELECT … WHERE idempotency_key = :key` is
+   the only required predicate; `external_receipts.idempotency_key` is
+   `UNIQUE` (migration `001_initial_schema`), so a duplicate insert
+   would also fail with `IntegrityError` as a backstop.
+
+3. **If found with status `succeeded`, return the cached
+   `response_payload` — do NOT re-execute.** The adapter MUST record
+   that the path was the dedup short-circuit (the test uses
+   `cached["reused"] = True`) so callers and audit logs can tell the
+   two paths apart. Do NOT mutate the receipt on a hit — leave the
+   existing row alone. The test
+   `test_second_call_with_same_key_skips_execution` pins both
+   behaviours.
+
+4. **If found with status `pending`, raise or wait.** A `pending`
+   row means another in-flight attempt owns the operation; calling
+   again would race. The adapter either raises a typed error (e.g.
+   `ReceiptInFlight`) that the orchestrator can convert into a retry
+   later, or blocks on the row until the in-flight attempt completes
+   and the row transitions to `succeeded` or `failed`. Do NOT execute
+   speculatively. (Not exercised in the spike — the test set covers
+   `succeeded` and `failed`, since `pending` requires concurrent
+   in-flight semantics that are awkward to simulate in a single-process
+   test.)
+
+5. **If not found (or found with status `failed`), insert the row and
+   execute the side-effect.** A `failed` row from a prior attempt MUST
+   NOT block a retry — overwrite it (or, alternatively, mark the old
+   row `failed` and insert a new one with a bumped attempt counter).
+   The test `test_failed_receipt_allows_retry` pins the over-write
+   semantics. After execution, set `status` to `succeeded` (or
+   `failed` with an error payload), `response_payload` to the
+   adapter's return value, and `completed_at` to `now()`.
+
+6. **Receipt writes happen in the same DB transaction as the
+   side-effect's success path.** The pattern above uses one
+   `session_scope()` for the dedup check and the insert; the
+   `session_scope()` helper in `orchestration/storage/db.py` commits
+   on exit and rolls back on exception, so a crash between "executed"
+   and "wrote receipt" leaves no row — which is fine, because the
+   retry will see no row and re-execute (per rule 5). The corollary
+   for adapters that need an external-ID returned from the API before
+   they can write the receipt: write a `pending` row first (within
+   the same transaction), perform the side-effect, then UPDATE the
+   row to `succeeded`/`failed` with the response payload. Never
+   commit a side-effect's result without first having a matching
+   receipt row in `external_receipts`.
+
+### What the spike verified
+
+`tests/spike/test_idempotency.py` exercises four cases against the
+real `external_receipts` table:
+
+| Test | Validates |
+| --- | --- |
+| `test_first_call_executes_and_persists_receipt` | Rule 2 + 5 + 6: no prior row → adapter executes once, receipt persisted with `status="succeeded"` and full `response_payload`. |
+| `test_second_call_with_same_key_skips_execution` | Rule 3: prior `succeeded` row → adapter does NOT re-execute (`self.calls` unchanged), does NOT insert a new row (still exactly one), returns cached payload with `reused=True`. |
+| `test_different_external_id_means_independent_execution` | Rule 1 (and the corollary that the key really does encode `external_id`): `T1` and `T2` produce two separate receipts under two separate keys. |
+| `test_failed_receipt_allows_retry` | Rule 5 corollary: a prior `failed` row is overwritten on the next attempt, not treated as a hit. |
+
+All four pass against `postgresql+asyncpg://orchestration:orchestration@localhost:5432/orchestration_test`.
+The autouse `_isolate_state` fixture in `tests/conftest.py`
+TRUNCATEs every table before each test, so each test starts on a
+clean schema.
+
+### What M2 must add to close the contract
+
+* Real `orchestration.adapters.task_source.base.TaskSourceAdapter`
+  and `.csv.CsvAdapter` modules that import this contract and
+  implement the six rules above (the spike's `FakeTaskSourceAdapter`
+  is a reference shape, not the production one).
+* An `idempotency_key` builder helper that takes the canonical
+  inputs `(project_id, task_id, stage, operation, attempt)` and
+  returns the deterministic key. Keep it a single pure function —
+  every adapter MUST go through it so the key format cannot drift.
+* A typed exception (`ReceiptInFlight` or similar) for the `pending`
+  path (rule 4) so the orchestrator can decide between raise-and-retry
+  and block-on-row.
+* An audit-log entry on every successful side-effect so the dedup
+  short-circuit is visible in `audit_log` (rule 3 corollary).
