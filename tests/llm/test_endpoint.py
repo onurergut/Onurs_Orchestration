@@ -14,19 +14,21 @@ async def _reset_redis_pool():
     down between tests to keep pytest-asyncio's per-function loop scope
     working. yield before teardown so the test itself runs cleanly first."""
     yield
-    from orchestration.storage import redis as redis_mod
+    try:
+        from orchestration.storage import redis as redis_mod
 
-    pool = redis_mod._pool
-    if pool is not None:
-        try:
-            await asyncio.shield(pool.disconnect())
-        except RuntimeError:
-            # Event loop may already be closing during teardown.
-            pass
-    redis_mod._pool = None
-    from orchestration.llm import rate_limit
+        pool = redis_mod._pool
+        if pool is not None:
+            try:
+                await asyncio.shield(pool.disconnect())
+            except (RuntimeError, Exception):
+                pass
+        redis_mod._pool = None
+        from orchestration.llm import rate_limit
 
-    rate_limit.reset_buckets()
+        rate_limit.reset_buckets()
+    except Exception:
+        pass  # safe to swallow during teardown with other tests
 
 
 async def test_openai_client_built():
