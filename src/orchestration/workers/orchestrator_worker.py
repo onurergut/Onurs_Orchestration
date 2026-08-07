@@ -26,9 +26,24 @@ async def run_flow(run_id: UUID) -> None:
         project_id=run.project_id,
         task_id=run.task_id,
     )
-    # CrewAI Flow takes its Pydantic state via the `initial_state` kwarg.
     flow = OrchestratorFlow(initial_state=state)
-    await flow.kickoff_async() if hasattr(flow, "kickoff_async") else flow.kickoff()
+
+    terminal_status = "succeeded"
+    try:
+        if hasattr(flow, "kickoff_async"):
+            await flow.kickoff_async()
+        else:
+            flow.kickoff()
+    except Exception:
+        terminal_status = "failed"
+        raise
+    finally:
+        async with session_scope() as session:
+            await session.execute(
+                update(Run)
+                .where(Run.id == run_id)
+                .values(status=terminal_status, finished_at=datetime.now(timezone.utc))
+            )
 
 
 if __name__ == "__main__":
