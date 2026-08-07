@@ -1,8 +1,28 @@
+import os
+
 from pydantic import BaseModel
-from crewai import Agent, Crew, Task
+from crewai import Agent, Crew, LLM, Task
 
 from orchestration.llm.client import LLMClient
 from orchestration.stages.base import StageContext, StageCrew
+
+
+def _build_crewai_llm() -> LLM:
+    """Build a CrewAI LLM from LLM_* env vars (Anthropic- or OpenAI-compatible)."""
+    protocol = os.environ.get("LLM_PROTOCOL", "anthropic").lower()
+    if protocol == "anthropic":
+        return LLM(
+            model=os.environ["LLM_MODEL"],
+            api_key=os.environ["LLM_API_KEY"],
+            base_url=os.environ.get("LLM_ENDPOINT_URL", "https://api.anthropic.com"),
+            provider="anthropic",
+        )
+    return LLM(
+        model=os.environ["LLM_MODEL"],
+        api_key=os.environ["LLM_API_KEY"],
+        base_url=os.environ.get("LLM_ENDPOINT_URL"),
+        provider="openai",
+    )
 
 
 class Plan(BaseModel):
@@ -16,11 +36,13 @@ class PlannerStage(StageCrew):
     output_schema = Plan
 
     def __init__(self):
+        self.llm = _build_crewai_llm()
         self.agent = Agent(
             role="Planner",
             goal="Produce a plan with files, steps, and risks for the given task",
             backstory="You are a meticulous software planner. Read the codebase and break the task into concrete steps.",
             allow_delegation=False,
+            llm=self.llm,
         )
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> Plan:

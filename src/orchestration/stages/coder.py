@@ -1,10 +1,12 @@
+import os
 from pathlib import Path
 
 from pydantic import BaseModel
-from crewai import Agent, Crew, Task
+from crewai import Agent, Crew, LLM, Task
 
 from orchestration.llm.client import LLMClient
 from orchestration.stages.base import StageContext, StageCrew
+from orchestration.stages.planner import _build_crewai_llm
 
 
 class CodeChange(BaseModel):
@@ -18,11 +20,13 @@ class CoderStage(StageCrew):
     output_schema = CodeChange
 
     def __init__(self):
+        self.llm = _build_crewai_llm()
         self.agent = Agent(
             role="Coder",
             goal="Implement the plan in the worktree",
             backstory="You write clean, minimal code. Always run tests after.",
             allow_delegation=False,
+            llm=self.llm,
         )
 
     async def run(self, ctx: StageContext, llm: LLMClient) -> CodeChange:
