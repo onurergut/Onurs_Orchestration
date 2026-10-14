@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="132" viewBox="0 0 920 132" role="img" aria-labelledby="title desc">
+  <title id="title">Seven-stage orchestration pipeline</title>
+  <desc id="desc">Task loading leads to planning and coding. Testing and security scanning then run together, followed by review and documentation.</desc>
+  <rect width="920" height="132" rx="16" fill="#0f172a"/>
+  <g fill="none" stroke="#334155" stroke-width="2">
+    <path d="M126 50H166"/>
+    <path d="M258 50H298"/>
+    <path d="M390 50H430"/>
+    <path d="M530 58C575 58 575 82 620 82"/>
+    <path d="M530 42C575 42 575 18 620 18"/>
+    <path d="M712 18H752"/>
+    <path d="M712 82H752"/>
+  </g>
+  <g fill="#38bdf8">
+    <path d="M160 45l6 5-6 5z"/>
+    <path d="M292 45l6 5-6 5z"/>
+    <path d="M424 45l6 5-6 5z"/>
+    <path d="M746 13l6 5-6 5z"/>
+    <path d="M746 77l6 5-6 5z"/>
+  </g>
+  <g font-family="ui-sans-serif, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="650" text-anchor="middle">
+    <rect x="24" y="26" width="102" height="48" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="75" y="55" fill="#f8fafc">Load task</text>
+    <rect x="166" y="26" width="92" height="48" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="212" y="55" fill="#f8fafc">Plan</text>
+    <rect x="298" y="26" width="92" height="48" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="344" y="55" fill="#f8fafc">Code</text>
+    <rect x="430" y="8" width="100" height="42" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="480" y="34" fill="#f8fafc">Test</text>
+    <rect x="430" y="68" width="100" height="42" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="480" y="94" fill="#f8fafc">Scan</text>
+    <rect x="620" y="8" width="92" height="42" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="666" y="34" fill="#f8fafc">Review</text>
+    <rect x="752" y="47" width="144" height="48" rx="10" fill="#1e293b" stroke="#38bdf8"/>
+    <text x="824" y="76" fill="#f8fafc">Update docs</text>
+  </g>
+</svg>
